@@ -39,15 +39,18 @@
     let applyingRemote = false;
     let cloudReady = false;
     let saveQueue = Promise.resolve();
+    let cacheAvailable = true;
 
     const clean = value => JSON.parse(JSON.stringify(value));
     const signature = value => JSON.stringify(value);
 
     function safeLocalPersist() {
+      if (!cacheAvailable) return false;
       try {
         localPersist();
         return true;
       } catch (error) {
+        cacheAvailable = false;
         console.warn('Browser cache is full; Firebase saving will continue.', error);
         return false;
       }
@@ -65,6 +68,13 @@
         keyById.set(id, child.key);
         rows.push(record);
       });
+      const timeOf = item => {
+        const primary = Date.parse(item.createdAt || '');
+        if (Number.isFinite(primary)) return primary;
+        const fallback = Date.parse(`${item.contactDate || item.purchaseDate || '1970-01-01'}T00:00:00`);
+        return Number.isFinite(fallback) ? fallback : 0;
+      };
+      rows.sort((a, b) => timeOf(b) - timeOf(a));
       return rows;
     }
 
@@ -73,8 +83,13 @@
       claims = recordsFromSnapshot(snapshot);
       baseline = new Map(claims.map(item => [String(item.id), signature(item)]));
       try {
-        try { localStorage.setItem(STORAGE, JSON.stringify(claims)); }
-        catch (error) { console.warn('Browser cache is full; cloud data remains available.', error); }
+        if (cacheAvailable) {
+          try { localStorage.setItem(STORAGE, JSON.stringify(claims)); }
+          catch (error) {
+            cacheAvailable = false;
+            console.warn('Browser cache is full; cloud data remains available.', error);
+          }
+        }
         render();
       } finally {
         applyingRemote = false;
